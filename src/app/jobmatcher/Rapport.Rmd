@@ -1,0 +1,367 @@
+---
+title: "Compte rendu de TP"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+### Nom et Prénom des étudiants du groupe :
+
+> Djerir Safa 
+
+### Librairies utilisées : 
+
+```{r,message = FALSE,warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(lubridate)
+library(nycflights13)
+library(ggplot2) 
+library(GGally)
+library(scales)
+library(RColorBrewer)
+library(dplyr)
+library(ggmap)
+library(mapview)
+library(sf)
+library(tm) 
+library(wordcloud)
+
+```
+
+
+### 1.Introduction:
+
+Dans le cadre de ce projet, nous nous sommes focalisés sur les offres d’emplois pour des Data Analysts et des Data Scientists. En effet, la recherche d'un emploi qui correspond au profil peux être compliqué au vu des différentes offres.
+
+Mais nous pensons que  *"Choisissez un travail que vous aimez et vous n’aurez pas à travailler un seul jour de votre vie"* Parce que  *"Le travail est la moitié de la santé"*.
+
+### 2.Objectifs:
+
+L'objectif principal est donc de construire une application qui permet de trouver les meilleures offres en terme de correspondance au profil. Par ailleurs, nous allons établir une carte représentant les lieux correspondant à ces propositions d'embauche.
+
+### 3.Déscription et Traitement des données :
+
+#### 3.1.Récupération de données: scrapping:
+
+Nous avons choisi de récupérer les données d'offre d'emploi de "Glassdoor" à partir de deux recherches:
+
+• Data Scientist en France
+
+• Data Analyst en France
+
+Nous avons utilisé Python et les librairies Selenium et BeautifulSoup afin de récupérer les données. En effet, la méthode consiste à simuler un navigateur internet, se rendre sur l'ensemble des pages des offres, et récupérer à partir du code HTML les informations qui nous intéressent.
+Pour 83 offres de Data Analyst et 91 offres de Data Scientist, nous avons donc récupéré les données suivantes: 
+
+
+
+Colonne     | Définition                                                    |  
+----------- | ------------------------------------------------------------- |
+Entreprise  | Nom de l’entreprise qui publie l’offre.                       | 
+Note        | Note Glassdoor de l’entreprise, de 0 et 5. (NA si pas de note)| 
+Poste       | "DA" si Data Analyst ou "DS" si Data Scientist.               | 
+Intitule    | Intitulé du poste tel qu'il apparait sur Glassdoor.           | 
+Ville       | Ville du poste.                                               | 
+Publication | Nombre de jours depuis la publication du poste.                   | 
+Salaire_bas | Estimation basse du salaire (Glassdoor).                      | 
+Salaire_haut| Estimation haute du salaire (Glassdoor).                      | 
+Top_societe | 1 si l’entreprise est top société auprès de glassdoor, 0 sinon| 
+Descr       | Descriptif complet du poste.                                  | 
+
+
+#### 3.2.Lecture des données:
+
+```{r,message = FALSE}
+jobs_data <- read_xlsx("data_jobs.xlsx")
+jobs_data = jobs_data[-c(1)] 
+# On élimine la première colonne car elle ne contient que les numéros de lignes.
+```
+
+On vas regarder la description genérale de nos données :
+
+```{r}
+summary(jobs_data)
+```
+
+Vu la description générale, nous avons à notre disposition, principalement des données textuelles sauf pour les salaires et les notes.Nous allons regarder dans un instant si les différences entre les offres de Data Analyst et de Data Scientist sont significatives pour ces variables là.
+
+Mais en premier temps, nous constatons que la variable publication qui est le nombre de jours depuis publication du poste est un `string` nous allons alors la transformer en un `numeric`. Dans cette transformation nous allons considérer les postes publiés il y a plus de 30 jours, comme étant publiés il y a 30 jours afin de simplifier les calculs. 
+
+#### 3.3.Traitement des données:
+
+Nous remarquons que certaines offres ont été publiées durant les dernières 24h, nous modifions cela en 1 jour.
+
+```{r}
+jobs_data$publication[jobs_data$publication =='24h'] <- '1j'
+```
+
+Nous allons maintenant créer une nouvelle variable date_pub qui va contenir la date de publication du poste.
+
+Nous commençons par extraire le nombre de jours de notre variable publication :
+
+```{r}
+x = jobs_data["publication"]
+list = as.list(x)
+x_number = regmatches(unlist(list), gregexpr("[[:digit:]]+", unlist(list)))
+pub = as.numeric(unlist(x_number))
+```
+
+Et maintenant la création de la variable date_pub :
+
+```{r}
+date1 = ymd("2022-02-08") # date de la récupération des données
+date_pub = date1 - pub
+jobs_data = cbind(jobs_data,date_pub)
+```
+
+Nous réordonnons les colonnes afin de mettre la date de publication à coté de la colonne 
+
+```{r}
+# Nous réordonnons les colonnes afin de mettre la date de publication à coté de 
+# la colonne publication
+jobs_data = jobs_data[,c(1:6,11,7:10)]
+```
+
+### 4.Analyse des données :
+
+#### 4.1 Comparaison des offres de Data Analyst et de Data Scientist:
+
+
+##### Note de l'entreprise :
+
+```{r,message = FALSE,,warning=FALSE}
+ggplot(jobs_data, aes(y=note, x=poste, fill =poste )) + geom_boxplot() + scale_fill_brewer(palette = "Paired",label = c("Data Analyst(DA)","Data Scientist(DS)")) + labs(title="Note de l'entreprise en fonction du type de poste ", x= "Type de poste", y ="Note de l'entreprise")
+```
+
+Nous remarquons que les notes d'entreprise se rapprochent entre les deux types de poste, ce qui peut être totalement logique car par exemple au sein de la même entreprise nous pouvons voir deux types de poste disponible.
+
+##### Salaire minimum :
+
+```{r,message = FALSE,,warning=FALSE}
+ggplot(jobs_data, aes(y=salaire_bas, x=poste, fill =poste )) + geom_boxplot() + scale_fill_brewer(palette = "Paired",label = c("Data Analyst(DA)","Data Scientist(DS)")) + labs(title="Salaire minimum proposé en fonction du type de poste ", x= "Type de poste", y ="Salaire minimum")
+```
+
+Pour le salaire minimum proposé ou estimé, nous remarquons une petite différence entre les deux. Nous cherchons à savoir alors si cette différence est significative. Pour cela, nous appliquons un test de Student. 
+
+```{r}
+t.test(jobs_data$salaire_bas[jobs_data$poste=="DS"],jobs_data$salaire_bas[jobs_data$poste=="DA"])
+```
+ 
+La p-valeur obtenue est à 0.29 on ne rejette donc pas l'hypothèse que la différence entre les deux est nulle. D’un autre côté, nous rappelons que nous n'avons en notre possession qu’un petit échantillon de moins de 100 salaires ce qui peut biaiser notre résultat. 
+
+##### Salaire maximum:
+
+De la même manière nous étudions les salaire maximum proposés ou estimés.
+
+```{r,message = FALSE,,warning=FALSE}
+ggplot(jobs_data, aes(y=salaire_haut, x=poste, fill =poste )) + geom_boxplot() + scale_fill_brewer(palette = "Paired",label = c("Data Analyst(DA)","Data Scientist(DS)")) + labs(title="Salaire maximum proposé en fonction du type de poste ", x= "Type de poste", y ="Salaire maximum") 
+```
+
+```{r}
+t.test(jobs_data$salaire_haut[jobs_data$poste=="DS"],jobs_data$salaire_haut[jobs_data$poste=="DA"])
+```
+ 
+Nous obtenons une p-valeur de 0.02. Ceci peut nous faire dire qu’une différence entre les salaires est bien présente. Sauf qu’une seconde limite vient faire face à notre analyse: les offres ne sont pas triées en fonction de l’expérience demandée. On ne peut donc pas conclure.
+
+##### Proportion relative des type de poste :
+
+Nous regardons maintenant la différence entre les deux types de poste en terme de proportion relative.
+
+```{r,message = FALSE,,warning=FALSE}
+ggplot(jobs_data,aes(x=(salaire_haut+salaire_bas)/2,fill = poste)) +
+    geom_histogram(aes(y =..ndensity..) ,binwidth=4, alpha=.5, position="identity") + geom_density(aes( y = ..scaled..,color =poste),alpha=0)+ scale_fill_brewer(palette = "Paired") + labs(title="Proportion relative des type de poste en fonction du salaire moyen ", x= "Salaire moyen", y ="Proportion relative des type de post") 
+
+```
+Nous pouvons remarquer que pour des salaires hauts nous trouvons plus de Data Scientist que Data Analyst mais en moyenne la proportion est quasi la même.
+
+
+```{r,message = FALSE,,warning=FALSE}
+ggplot(jobs_data,aes(x=note, fill=poste)) +
+    geom_histogram(aes(y =..ndensity..) ,binwidth=0.3, alpha=.5, position="identity") + geom_density(aes( y = ..scaled..,color =poste),alpha=0)+ scale_fill_brewer(palette = "Paired") + labs(title="Proportion relative des types de poste en fonction de la note d'entreprise ", x= "Note de l'entreprise", y ="Proportion relative des type de poste")
+```
+
+Quant à ce graphique de note d'entreprise, nous pouvons constater que, d'après les données que nous avons à notre disposition, il n'y a pas forcément de grande différence. Ce qui confirme bien ce que nous avons vu dans la dernière partie.
+
+##### Date de publication :
+
+
+```{r}
+ ggplot(jobs_data, aes(x = date_pub,fill = poste)) +
+geom_bar(position = "stack")+ scale_fill_brewer(palette = "Paired",label = c("Data Analyst(DA)","Data Scientist(DS)")) + labs(title="Nombre d'offres en fonction de la date de publication et le type du poste", x= "Date de publication", y ="Nombre d'offres")
+```
+
+Nous observons que beaucoup de nos offres ont été publiées depuis plus de 30 jours. Afin de mieux observer les reste des données, nous allons retirer ces offres là.
+
+```{r}
+s = jobs_data$date_pub[jobs_data$date_pub>"2022-01-09"]
+s_fill = jobs_data$poste[jobs_data$date_pub>"2022-01-09"]
+ ggplot(jobs_data[which(jobs_data$date_pub>"2022-01-09"),],aes(x = s,fill = s_fill)) +
+geom_bar(position = "stack")+ scale_fill_brewer(palette = "Paired",label = c("Data Analyst","Data Scientist"),name = "Poste") + labs(title="Nombre d'offres en fonction de la date de publication et le type du poste", x= "Date de publication", y ="Nombre d'offres") +
+   theme_bw()
+```
+
+Du graphique représenté ci-dessus, nous pouvons remarquer une petite saisonnalité de 7 jours (semaine). En effet, certains jours où aucune offre est publiée (par exemple le 30 janvier) correspondent au Dimanche. 
+En outre, nous ne constatons pas une grande différence entre la date de publication des deux types de poste. 
+
+Nous allons maintenant chercher si une différence entre les jours de semaine est présente.
+
+```{r}
+
+jours_semaine = ordered(weekdays(jobs_data$date_pub[jobs_data$date_pub>"2022-01-09"]), levels=c("Lundi", "Mardi", "Mercredi", "Jeudi", 
+"Vendredi", "Samedi", "Dimanche"))
+
+ggplot(jobs_data[which(jobs_data$date_pub>"2022-01-09"),],aes(x = jours_semaine,fill = s_fill)) +
+  geom_bar(position = "stack") +
+  scale_fill_brewer(palette = "Paired",label = c("Data Analyst","Data Scientist"),name = "Poste") + labs(title="Nombre d'offres en fonction du jour de la semaine et du type du poste", x= "Jour de publication", y ="Nombre d'offres") +
+  theme_bw()
+```
+
+De ce graphique, nous pouvons constater que très peu d'offres sont publiées le dimanche. Ceci correspond à un jour chômé  dans la grande majorité des entreprises.
+
+De plus, le lundi est le jour où le plus d'offres sont publiées. Cependant ceci peut être biaisé par le fait que nous avons transformé les dates de publication de moins de 24h en 1jour. Et comme nous avons scrapé les données un mardi, ceci peut avoir affecté le nombre d'offres entre le lundi et le mardi.
+
+En général, nous pouvons dire que le mercredi est le jour où, en moyenne, le nombre d'offres publiées est le plus faible.
+Les autres jours semblent relativement comparables.
+
+##### Ville :
+
+Afin de visualiser les emplacements des offres nous allons récupérer les coordonnées géographiques.
+
+```{r,message = FALSE,warning=FALSE}
+df = jobs_data %>% mutate_geocode(ville)
+```
+
+```{r,message = FALSE,,warning=FALSE}
+locations_df <- st_as_sf(df[which(!is.na(df$lon) ),], coords = c("lon", "lat"), crs = 4326)
+mapview(locations_df, grid = FALSE)
+```
+
+
+Sur cette carte, nous présentons les emplacements de certaines offres d'emploi. 
+Nous remarquons que beaucoup d'entres elles se situent en région parisienne (Ile de France).
+
+Afin de mieux visualiser la différence du nombre d'offres entre les régions, nous créons un data frame qui contient les emplacements avec le nombre d'offres correspondantes.
+
+
+```{r,message = FALSE,warning=FALSE}
+df_count = df[which(!is.na(df$lon) ),] %>% count(lon, lat, sort = TRUE)
+
+bw_map <- get_googlemap("France", zoom = 6,
+  color = "bw")
+ggmap(bw_map) +
+  geom_point(data = df_count,
+             aes(x = lon, y = lat,size = n),col = "blue")+
+  labs(title="Carte de France présentant le nombre d'offres pour chaque emplacement ", x= "Longitude", y ="Latitude")+ scale_size(name = "Nombre d'offres") 
+```
+
+Nous pouvons mieux constater que la majorité des offres se situe en région parisienne.
+
+
+```{r,message = FALSE,,warning=FALSE}
+bw_map2 <- get_googlemap("Paris", zoom = 10,
+  color = "bw")
+ggmap(bw_map2) +
+  geom_point(data = df_count,
+             aes(x = lon, y = lat,size = n),col = "blue")+
+  labs(title="Carte d'Ile de France présentant le nombre d'offres pour chaque emplacement ", x= "Longitude", y ="Latitude")+ scale_size(name = "Nombre d'offres") 
+```
+
+Nous observons sur la carte ci-dessus que le nombre d'offres est plus grand à Paris, ainsi qu'à La Défense, connue par le grand nombre d'entreprises présentes.
+
+```{r,message = FALSE,,warning=FALSE}
+
+ggmap(bw_map2) +
+  geom_point(data = df[which(!is.na(df$lon) ),],
+             aes(x = lon, y = lat,color = poste), alpha = 0.5) +
+  labs(title="Carte d'Ile de France présentant les emplacements de certaines offres de Data Sientist et Data Analyste", x= "Longitude", y ="Latitude")+ scale_color_discrete(name = "Poste") 
+``` 
+
+La disparité semble assez homogène. 
+
+#### 4.2 Nuages de mots : 
+
+Dans un second temps, nous essayons d'analyser les descriptifs de poste en fonction du type de poste. Nous pensons que l'illustration en forme de WordCloud est bien adaptée pour notre usage. En effet, les illustrations ci-après montrent l'occurrence de certains termes dans les descriptifs des postes. Plus le mot est gros plus il apparaît dans les descriptifs.
+ 
+```{r,message = FALSE,warning=FALSE}
+text_corpus <- Corpus(VectorSource(jobs_data$descr))
+text_corpus <- tm_map(text_corpus, content_transformer(tolower))
+text_corpus <- tm_map(text_corpus, removePunctuation)
+text_corpus <- tm_map(text_corpus, function(x)removeWords(x,stopwords(kind = "fr")))
+text_corpus <- tm_map(text_corpus, function(x)removeWords(x,stopwords(kind = "en")))
+set.seed(123456)  # permet de "fixer un graine" pour l'alea, afin de pouvoir regenerer plusieurs fois le meme wordcloud
+ pal <- brewer.pal(8,"Dark2")
+
+wordcloud(text_corpus, max.words = 250,min.freq = 10,rot.per = 0.15,
+random.order = F,  colors = pal, 	scale = c(3,0.2))
+```
+
+Nous avons remarqué que les mots 'Data' et 'Données' sont très présents dans nos données et ceci impacte l'apparition d'autres mots qui peuvent nous intéresser. 
+
+Nous présentons alors les wordcloud sans ces mots là.
+
+##### Wordcloud Data Scientist
+
+```{r,message = FALSE,warning=FALSE}
+
+text_corpus2 <- tm_map(text_corpus, function(x)removeWords(x,c("data", "données", "tout","etc","’","sein","tous")))
+
+set.seed(123456)  # permet de "fixer un graine" pour l'alea, afin de pouvoir regenerer plusieurs fois le meme wordcloud
+ pal <- brewer.pal(8,"Dark2")
+
+wordcloud(text_corpus2, max.words = 250,min.freq = 10,rot.per = 0.15,
+random.order = F,  colors = pal, 	scale = c(3,0.2))
+```
+ 
+##### Wordcloud Data Analyst 
+ 
+```{r,message = FALSE,warning=FALSE}
+text_corpus3 <- Corpus(VectorSource(jobs_data$descr[jobs_data$poste=="DA"]))
+text_corpus3 <- tm_map(text_corpus3, content_transformer(tolower))
+text_corpus3 <- tm_map(text_corpus3, removePunctuation)
+text_corpus3 <- tm_map(text_corpus3, function(x)removeWords(x,stopwords(kind = "fr")))
+text_corpus3 <- tm_map(text_corpus3, function(x)removeWords(x,stopwords(kind = "en")))
+text_corpus3 <- tm_map(text_corpus3, function(x)removeWords(x,c("data", "données","tous", "tout","etc","’","plus","sein","’","'","’")))
+
+set.seed(123456)  # permet de "fixer un graine" pour l'alea, afin de pouvoir regenerer plusieurs fois le meme wordcloud
+ pal <- brewer.pal(8,"Dark2")
+
+wordcloud(text_corpus3, max.words = 250,min.freq = 10,rot.per = 0.15,
+random.order = F,  colors = pal, 	scale = c(3,0.2))
+```
+
+Nous pouvons distinguer dans un premier temps le type de mission généralement proposé. Quand le Data Scientist est dans les statistiques, le marchine learning et qu'il travaille sur python, le Data Analyst lui, est dans l'analyse, la gestion et utilise des outils BI.
+
+
+
+### 5.Application Rshiny JobMatcher :
+
+Le Job Matcher a pour objectif d'établir un score pour une offre d'emploi en fonction des appétences du candidats. Ce dernier doit placer ses curseurs de préférence pour certaines caractéristiques.
+
+Nous avons dû traiter nos données afin de réaliser ceci. En effet, nous avons à notre disposition, des données textuelles, notamment le descriptif de chaque poste et son intitulé.
+
+Nous créons alors les colonnes: Python, SQL, CDI, alternance, stage, télétravail: on ajoute la valeur 1 si ces mêmes caractéristiques apparaissent au moins une fois dans le descriptif de l'offre; 0 sinon.
+
+Une fonction de score est ensuite appliquée à ses préférences et classe les offres d'emploi.
+
+La fonction de score se présente comme suit: 
+
+$ScoreJob_i = \frac{1}{1+e^{-Xi}}$
+
+
+Où
+
+$X_i = \sum_{n_{coeff}}^{}Coeff_{carac}*{1}_{carac}$
+
+
+Nous pouvons voir un exemple ci dessous:
+
+![Application job Matcher Tableau](Image1.png)
+![Application job Matcher Score Boxplot](Image2.png)
+
+
+L'application Rshiny peut être lancé à partir du fichier 'app.R'.
+
+### 6.Conclusion :
+
+
+L'outil permet alors d'aider dans la prise de décision d'un candidat dans son choix de futur poste. Il existe bien sûr plusieurs axes d'amélioration dans l'analyse. En particulier parfaire les données, y inclure l'expérience exigé par exemple.
